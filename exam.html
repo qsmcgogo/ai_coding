@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Coding 考试平台</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.min.css">
+</head>
+<body>
+    <!-- 顶栏 -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <a class="btn-back" href="index.html" title="返回题库">← 返回</a>
+            <span class="logo">AI Coding</span>
+            <span class="problem-title" id="problemTitle">加载中...</span>
+        </div>
+        <div class="topbar-right">
+            <button class="btn btn-danger" id="btnReset">↺ 重置代码</button>
+            <button class="btn btn-secondary" id="btnTest">⚙ 运行测试</button>
+            <button class="btn btn-secondary" id="btnPreview">▶ 预览运行</button>
+            <button class="btn btn-primary" id="btnSubmit">提交评测</button>
+            <span class="timer" id="timer">01:30:00</span>
+        </div>
+    </header>
+
+    <div class="main-layout">
+        <!-- 左栏：文件树 -->
+        <div class="panel panel-left" id="panelLeft">
+            <div class="panel-header">
+                <span>项目文件</span>
+            </div>
+            <div class="file-tree" id="fileTree"></div>
+        </div>
+
+        <div class="divider" id="dividerLeft"></div>
+
+        <!-- 中栏：编辑器/预览 -->
+        <div class="panel panel-center" id="panelCenter">
+            <div class="tab-bar" id="tabBar"></div>
+            <div class="editor-container" id="editorContainer"></div>
+            <!-- Markdown 渲染区 -->
+            <div class="markdown-view hidden" id="markdownView"></div>
+            <!-- 预览 iframe -->
+            <iframe class="preview-frame hidden" id="previewFrame" sandbox="allow-scripts allow-same-origin"></iframe>
+            <!-- 测试结果面板 -->
+            <div class="test-panel hidden" id="testPanel">
+                <div class="test-panel-header">
+                    <span>测试结果</span>
+                    <button class="test-panel-close" id="testPanelClose">×</button>
+                </div>
+                <div class="test-panel-body" id="testPanelBody"></div>
+            </div>
+        </div>
+
+        <div class="divider" id="dividerRight"></div>
+
+        <!-- 右栏：AI 对话 -->
+        <div class="panel panel-right" id="panelRight">
+            <div class="panel-header">
+                <span>AI 助手</span>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="chat-msg chat-msg-ai">
+                    <div class="chat-avatar">AI</div>
+                    <div class="chat-bubble">你好！我是 AI 助手，可以帮你理解题意、调试代码。有什么问题随时问我。</div>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="chatInput" placeholder="输入消息..." rows="3"></textarea>
+                <button class="btn btn-primary btn-send" id="btnSend">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

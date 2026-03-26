@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -m 15 \"https://one-api.nowcoder.com/v1/chat/completions\" -H \"Authorization: Bearer sk-CZov8xJ3CucUGw5F9f342fF9A8624aC3B79d7c226dC4E01d\" -H \"Content-Type: application/json\" -d '{\"\"model\"\":\"\"doubao-seed-1-6-flash-250828\"\",\"\"messages\"\":[{\"\"role\"\":\"\"user\"\",\"\"content\"\":\"\"你好\"\"}],\"\"temperature\"\":0.3,\"\"max_tokens\"\":128,\"\"stream\"\":false}')",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
+    ]
+  }
+}

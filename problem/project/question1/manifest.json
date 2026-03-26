@@ -1,0 +1,12 @@
+{
+    "title": "工程题 1：俄罗斯方块",
+    "time": 90,
+    "files": [
+        { "path": "README.md", "type": "md", "mode": "locked" },
+        { "path": "index.html", "type": "html", "mode": "locked" },
+        { "path": "css/style.css", "type": "css", "mode": "locked" },
+        { "path": "js/engine.js", "type": "js", "mode": "locked" },
+        { "path": "js/logic.js", "type": "js", "mode": "editable" },
+        { "path": "tests/test.js", "type": "js", "mode": "locked" }
+    ]
+}

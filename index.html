@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nowcoder AI Coding</title>
+    <link rel="stylesheet" href="css/home.css">
+</head>
+<body>
+    <!-- 背景动画粒子 -->
+    <canvas id="particles"></canvas>
+
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="brand-icon">⟨/⟩</span>
+            <span class="brand-text">Nowcoder <span class="brand-highlight">AI Coding</span></span>
+        </div>
+        <div class="nav-links">
+            <a href="#problems" class="nav-link active">题库</a>
+            <a href="#" class="nav-link">排行榜</a>
+            <a href="#" class="nav-link">文档</a>
+        </div>
+        <div class="nav-user">
+            <div class="avatar">N</div>
+        </div>
+    </nav>
+
+    <!-- Hero 区域 -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">NEW — AI 驱动的编程考核</div>
+            <h1 class="hero-title">
+                用 AI 写代码<br>
+                <span class="gradient-text">不只是会用，更要用得好</span>
+            </h1>
+            <p class="hero-desc">
+                全新的 AI Coding 能力评测平台。在真实工程项目中，考察你与 AI 协作完成复杂任务的能力。
+            </p>
+            <div class="hero-stats">
+                <div class="stat-item">
+                    <div class="stat-number" data-target="12">0</div>
+                    <div class="stat-label">道工程题</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" data-target="3">0</div>
+                    <div class="stat-label">大难度级别</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" data-target="1500">0</div>
+                    <div class="stat-label">人已参与</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 题单区域 -->
+    <section class="problems-section" id="problems">
+        <div class="section-header">
+            <h2 class="section-title">工程题库</h2>
+            <div class="filter-bar">
+                <button class="filter-btn active" data-filter="all">全部</button>
+                <button class="filter-btn" data-filter="frontend">前端</button>
+                <button class="filter-btn" data-filter="game">游戏</button>
+                <button class="filter-btn" data-filter="tool">工具</button>
+            </div>
+        </div>
+        <div class="problem-grid" id="problemGrid">
+            <!-- JS 动态渲染 -->
+        </div>
+    </section>
+
+    <footer class="footer">
+        <span>© 2026 Nowcoder AI Coding</span>
+        <span class="footer-sep">·</span>
+        <span>牛客网</span>
+    </footer>
+
+    <script src="js/home.js"></script>
+</body>
+</html>

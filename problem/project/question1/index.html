@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>俄罗斯方块</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="game-area">
+            <canvas id="board" width="300" height="600"></canvas>
+            <div class="overlay" id="overlay">
+                <div class="overlay-text" id="overlayText">按任意键开始</div>
+            </div>
+        </div>
+        <div class="side-panel">
+            <div class="info-box">
+                <h3>下一个</h3>
+                <canvas id="next" width="120" height="120"></canvas>
+            </div>
+            <div class="info-box">
+                <h3>得分</h3>
+                <div class="stat" id="score">0</div>
+            </div>
+            <div class="info-box">
+                <h3>等级</h3>
+                <div class="stat" id="level">1</div>
+            </div>
+            <div class="info-box">
+                <h3>行数</h3>
+                <div class="stat" id="lines">0</div>
+            </div>
+            <div class="info-box controls">
+                <h3>操作</h3>
+                <div class="control-item">← → 移动</div>
+                <div class="control-item">↑ 旋转</div>
+                <div class="control-item">↓ 加速</div>
+                <div class="control-item">空格 落底</div>
+                <div class="control-item">P 暂停</div>
+            </div>
+        </div>
+    </div>
+    <script src="js/logic.js"></script>
+    <script src="js/engine.js"></script>
+</body>
+</html>
