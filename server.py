@@ -33,17 +33,27 @@ SYSTEM_PROMPT = """
 <tools>
 你有两个特殊工具：
 
-1. 修改文件 — 当用户要求你写代码、实现功能、填充代码、修改文件时，必须使用此格式：
+1. 修改文件 — 当用户要求你写代码、实现功能、填充代码、修改文件时，必须使用以下格式之一：
+
+方式 A（替换整个文件，适用于短文件或全新实现）：
 <code-change path="文件路径">
 完整的新文件内容
 </code-change>
-重要：不要用 markdown 代码块（```）来展示完整文件代码，必须使用 <code-change> 标签，这样系统才能帮用户自动应用修改。
 
-2. 查看文件 — 当你需要查看某个文件的完整内容才能回答用户问题时使用：
-<read-file path="文件路径"/>
-系统会自动将文件内容提供给你，无需用户操作。
+方式 B（局部修改，适用于只改文件的一部分）：
+<code-edit path="文件路径">
+<<<< SEARCH
+要被替换的原始代码（必须与文件中完全一致）
+====
+替换后的新代码
+>>>> END
+</code-edit>
+一个 <code-edit> 中可以包含多个 SEARCH/REPLACE 块。
 
-注意：用户没有要求修改代码时不要使用 code-change；只在确实需要时使用 read-file。
+重要：不要用 markdown 代码块（```）来展示代码修改，必须使用上述标签，这样系统才能帮用户自动应用。短文件用方式 A，长文件局部修改用方式 B。
+
+注意：用户没有要求修改代码时不要使用 code-change / code-edit。
+环境信息中的 <file> 标签已包含所有可编辑文件的完整内容，你可以直接阅读，无需请求。
 </tools>
 """.strip()
 
@@ -128,14 +138,8 @@ def load_project_files(problem_id: str) -> dict:
     return files
 
 
-def call_ai(messages: list) -> str:
-    """调用大模型 API，messages 为完整的多轮对话"""
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    # 将 SYSTEM_PROMPT 合并到第一条 system 消息中（避免多条 system 冲突）
+def _build_messages(messages: list) -> list:
+    """将 SYSTEM_PROMPT 合并到消息列表中"""
     full_messages = []
     system_merged = False
     for m in messages:
@@ -152,32 +156,58 @@ def call_ai(messages: list) -> str:
     for m in full_messages:
         role = m.get("role", "?")
         content = m.get("content", "")
-        print(f"  [{role}] {content}")
-        print("  ---")
+        preview = content[:150].replace("\n", "\\n")
+        print(f"  [{role}] {preview}{'...' if len(content) > 150 else ''}")
+    print()
+
+    return full_messages
+
+
+def call_ai_stream(messages: list):
+    """流式调用大模型 API，yield 每个文本块"""
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    full_messages = _build_messages(messages)
 
     data = {
         "model": MODEL,
         "messages": full_messages,
         "temperature": 0.3,
         "max_tokens": 8192,
-        "stream": False,
+        "stream": True,
     }
 
-    try:
-        print(f"[AI] 正在调用模型 {MODEL}...")
-        resp = req_lib.post(API_URL, headers=headers, json=data, timeout=60)
-        print(f"[AI] 响应状态: {resp.status_code}, 耗时约完成")
-        if resp.status_code != 200:
-            print(f"[AI] 错误: {resp.text[:200]}")
-            return f"AI 服务返回错误 ({resp.status_code})，请稍后重试。"
-        js = resp.json()
-        return js["choices"][0]["message"]["content"].strip()
-    except req_lib.Timeout:
-        print("[AI] 请求超时(60s)")
-        return "AI 响应超时，请稍后重试。"
-    except Exception as e:
-        print(f"[AI] 异常: {type(e).__name__}: {e}")
-        return f"AI 调用异常: {e}"
+    print(f"[AI] 正在流式调用模型 {MODEL}...")
+    resp = req_lib.post(API_URL, headers=headers, json=data, timeout=60, stream=True)
+
+    if resp.status_code != 200:
+        print(f"[AI] 错误: {resp.text[:200]}")
+        yield f"AI 服务返回错误 ({resp.status_code})，请稍后重试。"
+        return
+
+    full_reply = []
+    for line in resp.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data: "):
+            continue
+        payload = line[6:]
+        if payload.strip() == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+            delta = chunk.get("choices", [{}])[0].get("delta", {})
+            content = delta.get("content", "")
+            if content:
+                full_reply.append(content)
+                yield content
+        except json.JSONDecodeError:
+            continue
+
+    reply_text = "".join(full_reply)
+    print(f"[AI] 流式完成，共 {len(reply_text)} 字")
+    print(f"[AI] 完整回复:\n{reply_text}\n")
 
 
 class ExamHandler(http.server.SimpleHTTPRequestHandler):
@@ -259,22 +289,34 @@ class ExamHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_chat(self, body):
-        """AI 对话接口"""
+        """AI 对话接口 — 流式 SSE 输出"""
         messages = body.get("messages", [])
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
 
         import time
         t0 = time.time()
-        reply = call_ai(messages)
+
+        try:
+            for chunk in call_ai_stream(messages):
+                # SSE 格式: data: ...\n\n
+                self.wfile.write(f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            # 发送结束信号
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except Exception as e:
+            print(f"[CHAT] 流式输出异常: {e}")
+            self.wfile.write(f"data: {json.dumps({'content': f'AI 调用异常: {e}'}, ensure_ascii=False)}\n\n".encode("utf-8"))
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
         elapsed = time.time() - t0
-
-        # 调试：打印 AI 回复
-        print(f"[CHAT] === AI 回复 ({len(reply)}字, {elapsed:.1f}s) ===")
-        reply_preview = reply[:300].replace("\n", "\\n")
-        suffix = "..." if len(reply) > 300 else ""
-        print(f"  {reply_preview}{suffix}")
-        print()
-
-        self._json_response({"reply": reply})
+        print(f"[CHAT] 流式输出完成 ({elapsed:.1f}s)")
 
     def _handle_test(self, body):
         """运行测试：将考生代码写入临时目录，执行 node tests/test.js"""

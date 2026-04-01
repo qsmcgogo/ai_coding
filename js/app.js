@@ -442,6 +442,45 @@
             }
         }
 
+        // 检测 <code-edit> 标签（search/replace 模式）
+        const CODE_EDIT_RE = /(?:```\s*)?<code-edit\s+path="([^"]+)">\s*\n?([\s\S]*?)<\/code-edit>(?:\s*```)?/g;
+        CODE_EDIT_RE.lastIndex = 0;
+        let editMatch;
+        while ((editMatch = CODE_EDIT_RE.exec(reply)) !== null) {
+            const editPath = editMatch[1];
+            const editBody = editMatch[2];
+            // 解析所有 SEARCH/REPLACE 块
+            const blockRe = /<<<< SEARCH\n([\s\S]*?)\n====\n([\s\S]*?)\n>>>> END/g;
+            let blockMatch;
+            let fileContent = modifiedFiles[editPath] || fileContents[editPath] || '';
+            let applied = false;
+            while ((blockMatch = blockRe.exec(editBody)) !== null) {
+                const search = blockMatch[1];
+                const replace = blockMatch[2];
+                if (fileContent.includes(search)) {
+                    fileContent = fileContent.replace(search, replace);
+                    applied = true;
+                }
+            }
+            if (applied) {
+                // 转换为 code-change 格式以复用现有的卡片 UI
+                if (editMatch.index > lastIndex) {
+                    textParts.push({ type: 'text', content: reply.slice(lastIndex, editMatch.index).trim() });
+                }
+                changes.push({ path: editPath, code: fileContent });
+                textParts.push({ type: 'change', index: changes.length - 1 });
+                lastIndex = editMatch.index + editMatch[0].length;
+            }
+        }
+
+        // 处理 code-edit 后面的剩余文本
+        if (lastIndex > 0 && lastIndex < reply.length) {
+            const remaining = reply.slice(lastIndex).trim();
+            if (remaining && !textParts.some(p => p.type === 'text' && p.content === remaining)) {
+                textParts.push({ type: 'text', content: remaining });
+            }
+        }
+
         return { textParts, changes };
     }
 
@@ -569,21 +608,33 @@
             return '  ' + f.path + tag;
         }).join('\n');
 
-        let fileInfo = '';
-        if (activeTabPath) {
-            const file = getFile(activeTabPath);
-            fileInfo = `<current-file path="${activeTabPath}" editable="${file && file.mode === 'editable'}">`;
-            if (file && file.mode === 'editable') {
-                const content = modifiedFiles[activeTabPath] || fileContents[activeTabPath];
+        // 所有可编辑文件的完整内容直接附上
+        let editableFiles = '';
+        PROJECT_FILES.forEach(f => {
+            if (f.mode === 'editable') {
+                const content = modifiedFiles[f.path] || fileContents[f.path];
                 if (content) {
-                    const preview = content.length > 100 ? content.slice(0, 100) + '...' : content;
-                    fileInfo += `\n${preview}\n`;
+                    editableFiles += `\n<file path="${f.path}">\n${content}\n</file>`;
                 }
             }
-            fileInfo += '</current-file>';
+        });
+
+        // 当前查看的文件（如果是只读的，给前 200 字预览）
+        let currentInfo = '';
+        if (activeTabPath) {
+            const file = getFile(activeTabPath);
+            if (file && file.mode !== 'editable') {
+                const content = modifiedFiles[activeTabPath] || fileContents[activeTabPath];
+                if (content) {
+                    const preview = content.length > 200 ? content.slice(0, 200) + '...' : content;
+                    currentInfo = `\n<current-file path="${activeTabPath}" readonly="true">\n${preview}\n</current-file>`;
+                }
+            } else {
+                currentInfo = `\n<current-file path="${activeTabPath}"/>`;
+            }
         }
 
-        return `<env>\n<project-files>\n${tree}\n</project-files>\n${fileInfo}\n</env>`;
+        return `<env>\n<project-files>\n${tree}\n</project-files>${editableFiles}${currentInfo}\n</env>`;
     }
 
     // ========== @文件 解析 ==========
@@ -606,29 +657,6 @@
             expanded += '\n\n' + attachments.join('\n\n');
         }
         return expanded;
-    }
-
-    // ========== <read-file> 检测 ==========
-    const READ_FILE_RE = /<read-file\s+path="([^"]+)"\s*\/>/g;
-
-    function detectReadFileRequests(reply) {
-        const requests = [];
-        let match;
-        READ_FILE_RE.lastIndex = 0;
-        while ((match = READ_FILE_RE.exec(reply)) !== null) {
-            requests.push(match[1]);
-        }
-        return requests;
-    }
-
-    function buildFileContent(paths) {
-        // 构造文件内容消息
-        const parts = paths.map(p => {
-            const content = modifiedFiles[p] || fileContents[p];
-            if (content) return `[文件: ${p}]\n${content}`;
-            return `[文件: ${p}] (不存在)`;
-        });
-        return parts.join('\n\n');
     }
 
     // ========== 发送消息 ==========
@@ -679,27 +707,92 @@
                 return;
             }
 
-            const data = await resp.json();
-            const reply = data.reply || '抱歉，我暂时无法回答。';
+            removeThinking();
 
-            // 检测 AI 是否请求读取文件
-            const readRequests = detectReadFileRequests(reply);
-            if (readRequests.length > 0) {
-                // AI 需要看文件，自动补充内容再请求一次
-                const fileMsg = buildFileContent(readRequests);
-                chatHistory.push({ role: 'assistant', content: reply });
-                chatHistory.push({ role: 'user', content: '[系统自动提供文件内容]\n' + fileMsg });
+            // 创建流式消息气泡
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg chat-msg-ai';
+            const bubbleEl = document.createElement('div');
+            bubbleEl.className = 'chat-bubble';
+            msgEl.innerHTML = '<div class="chat-avatar">AI</div>';
+            msgEl.appendChild(bubbleEl);
+            $chatMessages.appendChild(msgEl);
 
-                // 再调一次 AI
-                await callAIAndHandle();
-                return;
+            let fullReply = '';
+            let displayedLen = 0;
+            const CHAR_DELAY = 15; // 每个字符的显示间隔（毫秒）
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamDone = false;
+
+            // 逐字渲染定时器
+            let renderTimer = null;
+            function tickRender() {
+                if (displayedLen < fullReply.length) {
+                    // 每次显示一批字符（追赶速度）
+                    const batch = Math.min(3, fullReply.length - displayedLen);
+                    displayedLen += batch;
+                    bubbleEl.textContent = fullReply.slice(0, displayedLen);
+                    $chatMessages.scrollTop = $chatMessages.scrollHeight;
+                    renderTimer = setTimeout(tickRender, CHAR_DELAY);
+                } else {
+                    renderTimer = null;
+                }
             }
 
-            removeThinking();
+            while (!streamDone) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // 按 SSE 规范解析：消息之间用 \n\n 分隔
+                let eventEnd;
+                while ((eventEnd = buffer.indexOf('\n\n')) !== -1) {
+                    const event = buffer.slice(0, eventEnd);
+                    buffer = buffer.slice(eventEnd + 2);
+
+                    for (const line of event.split('\n')) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (payload === '[DONE]') { streamDone = true; break; }
+                        try {
+                            const chunk = JSON.parse(payload);
+                            if (chunk.content) {
+                                fullReply += chunk.content;
+                                // 启动逐字渲染（如果没在跑）
+                                if (!renderTimer) tickRender();
+                            }
+                        } catch (e) { /* skip */ }
+                    }
+                    if (streamDone) break;
+                }
+            }
+
+            // 流结束后，等逐字渲染追完
+            await new Promise(resolve => {
+                function waitRender() {
+                    if (displayedLen >= fullReply.length) {
+                        if (renderTimer) clearTimeout(renderTimer);
+                        resolve();
+                    } else {
+                        setTimeout(waitRender, 20);
+                    }
+                }
+                waitRender();
+            });
+
+            // 流结束后，用完整 markdown 渲染替换纯文本
+            const reply = fullReply || '抱歉，我暂时无法回答。';
+
+            // 替换为完整渲染（含 code-change 卡片等）
+            msgEl.remove();
             renderAIReply(reply);
             chatHistory.push({ role: 'assistant', content: reply });
 
         } catch (e) {
+            console.error('[callAIAndHandle] 异常:', e);
             removeThinking();
             addChatMessage('ai', '网络连接失败，请检查服务是否启动。');
         }
@@ -797,7 +890,6 @@
 
     // ========== 预览运行 ==========
     $btnPreview.addEventListener('click', async function () {
-        // 获取所有需要的文件内容
         const getContent = async (path) => {
             if (modifiedFiles[path]) return modifiedFiles[path];
             if (fileContents[path]) return fileContents[path];
@@ -808,66 +900,58 @@
             return '';
         };
 
-        const css = await getContent('css/style.css');
-        const logicJs = await getContent('js/logic.js');
-        const engineJs = await getContent('js/engine.js');
+        // 获取题目的 index.html 作为模板
+        let template = await getContent('index.html');
+        if (!template) {
+            addChatMessage('ai', '预览失败：找不到 index.html');
+            return;
+        }
 
-        // 组装完整 HTML
-        const html = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>预览 - 俄罗斯方块</title>
-    <style>${css}</style>
-</head>
-<body>
-    <div class="container">
-        <div class="game-area">
-            <canvas id="board" width="300" height="600"></canvas>
-            <div class="overlay" id="overlay">
-                <div class="overlay-text" id="overlayText">按任意键开始</div>
-            </div>
-        </div>
-        <div class="side-panel">
-            <div class="info-box">
-                <h3>下一个</h3>
-                <canvas id="next" width="120" height="120"></canvas>
-            </div>
-            <div class="info-box">
-                <h3>得分</h3>
-                <div class="stat" id="score">0</div>
-            </div>
-            <div class="info-box">
-                <h3>等级</h3>
-                <div class="stat" id="level">1</div>
-            </div>
-            <div class="info-box">
-                <h3>行数</h3>
-                <div class="stat" id="lines">0</div>
-            </div>
-            <div class="info-box controls">
-                <h3>操作</h3>
-                <div class="control-item">← → 移动</div>
-                <div class="control-item">↑ 旋转</div>
-                <div class="control-item">↓ 加速</div>
-                <div class="control-item">空格 落底</div>
-                <div class="control-item">P 暂停</div>
-            </div>
-        </div>
-    </div>
-    <script>${logicJs}<\/script>
-    <script>${engineJs}<\/script>
-</body>
-</html>`;
+        // 将外部 CSS 引用替换为内联 style
+        template = template.replace(
+            /<link\s+rel="stylesheet"\s+href="([^"]+)"[^>]*>/g,
+            function (match, href) {
+                // 同步获取已加载的内容（异步已在上面处理）
+                return '<style>/* ' + href + ' */</style>';
+            }
+        );
 
-        // 用 Blob URL 打开新窗口
-        const blob = new Blob([html], { type: 'text/html' });
+        // 收集所有 CSS 文件内容
+        const cssFiles = PROJECT_FILES.filter(f => f.path.endsWith('.css'));
+        let allCss = '';
+        for (const f of cssFiles) {
+            allCss += await getContent(f.path) + '\n';
+        }
+
+        // 收集所有 JS 文件内容（按 index.html 中的 script 标签顺序）
+        const scriptOrder = [];
+        const scriptRe = /<script\s+src="([^"]+)"[^>]*><\/script>/g;
+        let sMatch;
+        while ((sMatch = scriptRe.exec(template)) !== null) {
+            scriptOrder.push(sMatch[1]);
+        }
+
+        let allScripts = '';
+        for (const src of scriptOrder) {
+            const content = await getContent(src);
+            allScripts += '<script>' + content + '<\/script>\n';
+        }
+
+        // 替换 link 标签为内联 CSS
+        template = template.replace(/<link\s+rel="stylesheet"\s+href="[^"]*"[^>]*>/g, '');
+        // 在 </head> 前插入所有 CSS
+        template = template.replace('</head>', '<style>\n' + allCss + '\n</style>\n</head>');
+        // 替换 script 标签为内联 JS
+        template = template.replace(/<script\s+src="[^"]*"[^>]*><\/script>/g, '');
+        // 在 </body> 前插入所有 JS
+        template = template.replace('</body>', allScripts + '\n</body>');
+
+        const blob = new Blob([template], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
-        const win = window.open(url, '_blank', 'width=560,height=680');
+        const win = window.open(url, '_blank', 'width=600,height=700');
         if (!win) {
             addChatMessage('ai', '弹窗被浏览器拦截，请允许弹窗后重试。');
         }
-        // 延迟释放 URL
         setTimeout(() => URL.revokeObjectURL(url), 5000);
     });
 
