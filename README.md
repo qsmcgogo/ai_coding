@@ -8,10 +8,11 @@
 
 - **三栏 IDE 环境**：左侧项目文件树（锁定/可编辑标识）、中间 Monaco 代码编辑器、右侧 AI 对话助手
 - **工程题库**：每道题是一个真实项目骨架，考生在约定接口上实现功能，测试用例自动评分
-- **AI 助手**：内置大模型对话，可帮助理解题意、调试代码（限制不直接给完整实现）
+- **AI 助手**：内置大模型对话（doubao-seed-1-6-flash），支持 `@文件` 引用完整文件内容、AI 主动请求查看文件、代码修改建议（接受/拒绝）
 - **在线测试**：一键运行测试，结果实时展示在底部面板
+- **预览运行**：iframe 内运行考生代码，实时试玩游戏效果
 - **代码持久化**：基于 localStorage 的浏览器缓存，关闭页面后可继续做题
-- **重置代码**：一键恢复初始状态
+- **重置代码**：一键从服务器拉取原始文件恢复初始状态
 
 ## 快速开始
 
@@ -37,14 +38,23 @@ ai_coding/
 ├── server.py               # Python 后端（静态服务 + API）
 ├── problem/
 │   └── project/
-│       └── question1/      # 工程题 1：俄罗斯方块
+│       ├── question1/      # 工程题 1：俄罗斯方块 ★★
+│       │   ├── manifest.json
+│       │   ├── README.md
+│       │   ├── index.html
+│       │   ├── css/style.css
+│       │   ├── js/
+│       │   │   ├── engine.js   # 游戏引擎 [锁定]
+│       │   │   └── logic.js    # 考生实现 [可编辑]
+│       │   └── tests/test.js   # 自动化测试 [锁定]
+│       └── question2/      # 工程题 2：贪吃蛇 ★★★★
 │           ├── manifest.json
 │           ├── README.md
 │           ├── index.html
 │           ├── css/style.css
 │           ├── js/
-│           │   ├── engine.js   # 游戏引擎 [锁定]
-│           │   └── logic.js    # 考生实现 [可编辑]
+│           │   ├── engine.js   # 有 Bug 的引擎 [可编辑]
+│           │   └── logic.js    # 无注释空函数 [可编辑]
 │           └── tests/test.js   # 自动化测试 [锁定]
 └── docs/                   # 开发文档及杂项
 ```
@@ -72,6 +82,6 @@ ai_coding/
 ## 技术栈
 
 - 前端：原生 HTML/CSS/JS + Monaco Editor（CDN）
-- 后端：Python 标准库 `http.server` + `requests`
-- AI：牛客 One API（兼容 OpenAI 接口）
+- 后端：Python 标准库 `http.server` + `urllib`
+- AI：牛客 One API（兼容 OpenAI 接口，模型 qwen3.5-flash）
 - 评测：Node.js 执行测试脚本，JSON 格式输出结果
