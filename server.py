@@ -18,7 +18,7 @@ PROBLEMS_DIR = os.path.join(BASE_DIR, "problem", "project")
 # ========== AI 模型配置 ==========
 API_URL = "https://one-api.nowcoder.com/v1/chat/completions"
 API_KEY = "sk-CZov8xJ3CucUGw5F9f342fF9A8624aC3B79d7c226dC4E01d"
-MODEL = "doubao-seed-1-6-flash-250828"
+MODEL = "qwen3.5-flash"
 
 SYSTEM_PROMPT = """
 <role>
@@ -33,10 +33,11 @@ SYSTEM_PROMPT = """
 <tools>
 你有两个特殊工具：
 
-1. 修改文件 — 当用户明确要求你修改或实现某个文件的代码时使用：
+1. 修改文件 — 当用户要求你写代码、实现功能、填充代码、修改文件时，必须使用此格式：
 <code-change path="文件路径">
 完整的新文件内容
 </code-change>
+重要：不要用 markdown 代码块（```）来展示完整文件代码，必须使用 <code-change> 标签，这样系统才能帮用户自动应用修改。
 
 2. 查看文件 — 当你需要查看某个文件的完整内容才能回答用户问题时使用：
 <read-file path="文件路径"/>
@@ -158,7 +159,7 @@ def call_ai(messages: list) -> str:
         "model": MODEL,
         "messages": full_messages,
         "temperature": 0.3,
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "stream": False,
     }
 
@@ -299,24 +300,48 @@ class ExamHandler(http.server.SimpleHTTPRequestHandler):
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(content)
 
+            # 确保可编辑的 js 文件末尾有 module.exports（AI 可能会覆盖掉）
+            # 从原始题目文件中提取 exports 并注入
+            for rel_path, content in files.items():
+                if not rel_path.endswith('.js') or 'module.exports' in content:
+                    continue
+                # 读取原始文件看有没有 exports 模板
+                orig_file = os.path.join(problem_dir, rel_path)
+                if not os.path.isfile(orig_file):
+                    continue
+                with open(orig_file, 'r', encoding='utf-8') as f:
+                    orig_content = f.read()
+                # 从原始文件提取 module.exports 部分
+                import re
+                match = re.search(r'(if\s*\(typeof module.*?module\.exports\s*=\s*\{[^}]+\}[^}]*\})', orig_content, re.DOTALL)
+                if match:
+                    target = os.path.join(tmp_dir, "project", rel_path)
+                    with open(target, 'a', encoding='utf-8') as f:
+                        f.write('\n\n// === 自动注入 exports ===\n' + match.group(1) + '\n')
+
             test_file = os.path.join(tmp_dir, "project", "tests", "test.js")
             if not os.path.isfile(test_file):
                 self._json_response({"results": [], "error": "测试文件不存在"})
                 return
 
+            # 尝试找 node 路径
+            import shutil as _shutil
+            node_bin = _shutil.which("node") or r"C:\Users\nowcoder\AppData\Local\nvm\v22.19.0\node.exe"
             result = subprocess.run(
-                ["node", test_file],
+                [node_bin, test_file],
                 capture_output=True,
                 text=True,
                 timeout=15,
                 cwd=os.path.join(tmp_dir, "project"),
+                encoding="utf-8",
+                errors="replace",
             )
 
             try:
-                test_data = json.loads(result.stdout)
-            except json.JSONDecodeError:
+                test_data = json.loads(result.stdout or "")
+            except (json.JSONDecodeError, TypeError):
                 test_data = {
-                    "results": [{"name": "运行测试", "passed": False, "message": result.stdout + result.stderr}],
+                    "results": [{"name": "运行测试", "passed": False, "message": (result.stdout or "") + (result.stderr or "")}],
                 }
 
             self._json_response(test_data)

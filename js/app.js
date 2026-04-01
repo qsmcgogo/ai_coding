@@ -418,6 +418,30 @@
             if (tail) textParts.push({ type: 'text', content: tail });
         }
 
+        // 兜底：如果没检测到 <code-change>，尝试从 markdown 代码块中提取
+        if (changes.length === 0) {
+            const mdRe = /```(?:javascript|js)?\s*\n([\s\S]*?)```/g;
+            let mdMatch;
+            while ((mdMatch = mdRe.exec(reply)) !== null) {
+                const code = mdMatch[1].trim();
+                // 只有代码足够长（像完整文件）且当前文件可编辑时才当作修改
+                if (code.length > 200 && activeTabPath) {
+                    const file = getFile(activeTabPath);
+                    if (file && file.mode === 'editable') {
+                        changes.push({ path: activeTabPath, code: code });
+                        // 重建 textParts
+                        textParts.length = 0;
+                        const before = reply.slice(0, mdMatch.index).trim();
+                        if (before) textParts.push({ type: 'text', content: before });
+                        textParts.push({ type: 'change', index: 0 });
+                        const after = reply.slice(mdMatch.index + mdMatch[0].length).trim();
+                        if (after) textParts.push({ type: 'text', content: after });
+                        break; // 只取第一个大代码块
+                    }
+                }
+            }
+        }
+
         return { textParts, changes };
     }
 
@@ -742,28 +766,109 @@
     }
 
     // ========== 重置代码 ==========
-    document.getElementById('btnReset').addEventListener('click', function () {
+    document.getElementById('btnReset').addEventListener('click', async function () {
         if (!confirm('确定要重置所有代码到初始状态吗？你的修改将丢失。')) return;
 
         clearStorage();
         modifiedFiles = {};
 
-        // 重新加载所有已打开的可编辑文件的 model 内容
-        openTabs.forEach(tab => {
-            const file = getFile(tab.path);
-            if (file && file.mode === 'editable' && tab.model) {
-                const original = fileContents[tab.path] || '';
-                tab.model.setValue(original);
+        // 从服务器重新拉取原始文件内容
+        for (const file of PROJECT_FILES) {
+            if (file.mode === 'editable') {
+                try {
+                    const resp = await fetch(`/api/file?problem=${PROBLEM_ID}&path=${encodeURIComponent(file.path)}`);
+                    if (resp.ok) {
+                        const original = await resp.text();
+                        fileContents[file.path] = original;
+                        // 更新已打开的 tab
+                        const tab = openTabs.find(t => t.path === file.path);
+                        if (tab && tab.model) {
+                            tab.model.setValue(original);
+                        }
+                    }
+                } catch (e) {
+                    console.error('重置文件失败:', file.path, e);
+                }
             }
-        });
+        }
 
         addChatMessage('ai', '代码已重置为初始状态。');
     });
 
     // ========== 预览运行 ==========
-    $btnPreview.addEventListener('click', function () {
-        // TODO: 组装项目文件，在 iframe 中运行
-        addChatMessage('ai', '预览功能开发中...');
+    $btnPreview.addEventListener('click', async function () {
+        // 获取所有需要的文件内容
+        const getContent = async (path) => {
+            if (modifiedFiles[path]) return modifiedFiles[path];
+            if (fileContents[path]) return fileContents[path];
+            try {
+                const resp = await fetch(`/api/file?problem=${PROBLEM_ID}&path=${encodeURIComponent(path)}`);
+                if (resp.ok) return await resp.text();
+            } catch (e) {}
+            return '';
+        };
+
+        const css = await getContent('css/style.css');
+        const logicJs = await getContent('js/logic.js');
+        const engineJs = await getContent('js/engine.js');
+
+        // 组装完整 HTML
+        const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>预览 - 俄罗斯方块</title>
+    <style>${css}</style>
+</head>
+<body>
+    <div class="container">
+        <div class="game-area">
+            <canvas id="board" width="300" height="600"></canvas>
+            <div class="overlay" id="overlay">
+                <div class="overlay-text" id="overlayText">按任意键开始</div>
+            </div>
+        </div>
+        <div class="side-panel">
+            <div class="info-box">
+                <h3>下一个</h3>
+                <canvas id="next" width="120" height="120"></canvas>
+            </div>
+            <div class="info-box">
+                <h3>得分</h3>
+                <div class="stat" id="score">0</div>
+            </div>
+            <div class="info-box">
+                <h3>等级</h3>
+                <div class="stat" id="level">1</div>
+            </div>
+            <div class="info-box">
+                <h3>行数</h3>
+                <div class="stat" id="lines">0</div>
+            </div>
+            <div class="info-box controls">
+                <h3>操作</h3>
+                <div class="control-item">← → 移动</div>
+                <div class="control-item">↑ 旋转</div>
+                <div class="control-item">↓ 加速</div>
+                <div class="control-item">空格 落底</div>
+                <div class="control-item">P 暂停</div>
+            </div>
+        </div>
+    </div>
+    <script>${logicJs}<\/script>
+    <script>${engineJs}<\/script>
+</body>
+</html>`;
+
+        // 用 Blob URL 打开新窗口
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank', 'width=560,height=680');
+        if (!win) {
+            addChatMessage('ai', '弹窗被浏览器拦截，请允许弹窗后重试。');
+        }
+        // 延迟释放 URL
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
     });
 
     // ========== 提交评测 ==========
