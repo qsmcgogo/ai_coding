@@ -69,6 +69,7 @@
     const $chatMessages = document.getElementById('chatMessages');
     const $chatInput = document.getElementById('chatInput');
     const $btnSend = document.getElementById('btnSend');
+    const $btnStop = document.getElementById('btnStop');
     const $btnTest = document.getElementById('btnTest');
     const $btnPreview = document.getElementById('btnPreview');
     const $btnSubmit = document.getElementById('btnSubmit');
@@ -677,6 +678,25 @@
         await callAIAndHandle();
     }
 
+    let currentAbortController = null;
+
+    function showStopButton() {
+        $btnSend.classList.add('hidden');
+        $btnStop.classList.remove('hidden');
+    }
+
+    function hideStopButton() {
+        $btnStop.classList.add('hidden');
+        $btnSend.classList.remove('hidden');
+    }
+
+    $btnStop.addEventListener('click', function () {
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+    });
+
     async function callAIAndHandle() {
         const trimmedHistory = chatHistory.map((msg, i) => {
             if (i === chatHistory.length - 1) return msg;
@@ -691,6 +711,9 @@
             ...trimmedHistory,
         ];
 
+        currentAbortController = new AbortController();
+        showStopButton();
+
         try {
             const resp = await fetch('/api/chat', {
                 method: 'POST',
@@ -699,6 +722,7 @@
                     messages: apiMessages,
                     problem: PROBLEM_ID,
                 }),
+                signal: currentAbortController.signal,
             });
 
             if (!resp.ok) {
@@ -792,9 +816,25 @@
             chatHistory.push({ role: 'assistant', content: reply });
 
         } catch (e) {
-            console.error('[callAIAndHandle] 异常:', e);
-            removeThinking();
-            addChatMessage('ai', '网络连接失败，请检查服务是否启动。');
+            if (e.name === 'AbortError') {
+                // 用户点了停止
+                if (renderTimer) clearTimeout(renderTimer);
+                if (fullReply) {
+                    // 保留已收到的内容
+                    msgEl.remove();
+                    renderAIReply(fullReply);
+                    chatHistory.push({ role: 'assistant', content: fullReply });
+                } else {
+                    removeThinking();
+                }
+            } else {
+                console.error('[callAIAndHandle] 异常:', e);
+                removeThinking();
+                addChatMessage('ai', '网络连接失败，请检查服务是否启动。');
+            }
+        } finally {
+            hideStopButton();
+            currentAbortController = null;
         }
     }
 
